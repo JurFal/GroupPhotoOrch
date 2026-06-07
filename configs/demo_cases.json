@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "case_id": "g1_p1",
+      "goal": "insert_person_into_group_photo",
+      "computer_graphics_root": "Computer-Graphics",
+      "group_id": "g1",
+      "person_id": "p1",
+      "top_k": 5,
+      "expected": {
+        "min_group_persons": 2,
+        "max_group_persons": 120,
+        "min_persons_in_individual": 1
+      },
+      "revision_limits": {
+        "vision": 1,
+        "insertion": 1,
+        "compositing": 1
+      }
+    }
+  ]
+}

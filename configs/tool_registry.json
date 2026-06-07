@@ -1,0 +1,44 @@
+{
+  "tools": {
+    "vision.inspect_existing_artifacts": {
+      "description": "Inspect existing sam3_masks and person_metadata artifacts without schema adaptation.",
+      "mode": "python_adapter",
+      "stage": "stage1_observation"
+    },
+    "vision.generate_sam3_masks": {
+      "description": "Run Computer-Graphics/scripts/generate_sam3_masks.py for selected case images.",
+      "mode": "command_tool",
+      "stage": "stage1_perception",
+      "expensive": true,
+      "requires": ["sam3", "checkpoint_or_hf_download", "torch"]
+    },
+    "vision.generate_yolo_person_masks": {
+      "description": "Run Computer-Graphics/scripts/generate_yolo_person_masks.py as local person segmentation fallback.",
+      "mode": "command_tool",
+      "stage": "stage1_perception",
+      "expensive": true,
+      "requires": ["ultralytics", "model_weights"]
+    },
+    "vision.extract_metadata_from_masks": {
+      "description": "Run Computer-Graphics/scripts/extract_metadata_from_sam3.py on SAM3/YOLO instance-mask layout.",
+      "mode": "command_tool",
+      "stage": "stage1_perception"
+    },
+    "insertion.find_candidates": {
+      "description": "Call PersonInserter.find_insertion_patches and serialize lightweight candidate summaries.",
+      "mode": "python_adapter",
+      "stage": "geometry_insertion"
+    },
+    "compositing.run_light_smoke": {
+      "description": "Run ImageCompositor.MRFImageCompositor on a tiny synthetic patch to validate the light-consistency prototype.",
+      "mode": "python_adapter",
+      "stage": "stage3_light_consistency"
+    },
+    "compositing.compose_top_candidate": {
+      "description": "Run PersonInserter.compose_and_paste with ImageCompositor on a selected candidate.",
+      "mode": "python_adapter",
+      "stage": "stage3_compositing",
+      "expensive": true
+    }
+  }
+}
