@@ -20,6 +20,7 @@ class ToolBox:
             "vision.generate_yolo_person_masks": stage1_tools.generate_yolo_person_masks,
             "vision.extract_metadata_from_masks": stage1_tools.extract_metadata_from_masks,
             "insertion.find_candidates": insertion_tools.find_candidates,
+            "compositing.align_tone_hsv": stage3_tools.align_tone_hsv,
             "compositing.run_light_smoke": stage3_tools.run_light_smoke,
             "compositing.compose_top_candidate": stage3_tools.compose_top_candidate,
         }

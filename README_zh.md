@@ -1,6 +1,6 @@
 # ReAct Orchestrator 中文运行说明
 
-`orchestrator/` 是本项目的 Agent 总控层。它不直接修改 `Computer-Graphics/` 的代码，而是把 `Computer-Graphics/` 里的脚本和接口包装成 Agent 可调用的工具，并把每一步写入 `agent_trace.json`。
+`orchestrator/` 现在位于 `Computer-Graphics/orchestrator/`，是本项目的 Agent 总控层。它不直接修改 `Computer-Graphics/` 的工具代码，而是把同级目录里的脚本和接口包装成 Agent 可调用的工具，并把每一步写入 `agent_trace.json`。
 
 当前默认流程是规则型 ReAct：
 
@@ -9,6 +9,8 @@ Thought -> Action -> Observation -> Verification -> Decision
 ```
 
 默认不会自动跑 SAM3 / YOLO 这类重模型，也不会自动跑耗时的最终合成；这些工具已经注册好，可以单独调用。
+
+下方启动示例都会先进入 `Computer-Graphics/` 根目录；如果已经在该目录中，可以省略 `cd Computer-Graphics`。
 
 ## 1. 目录说明
 
@@ -50,6 +52,7 @@ conda run -n check-numpy python -m pip install Pillow
 只跑 dry-run 时可以直接用系统 Python：
 
 ```bash
+cd Computer-Graphics
 python3 orchestrator/scripts/run_react_demo.py --dry-run
 ```
 
@@ -60,6 +63,7 @@ python3 orchestrator/scripts/run_react_demo.py --dry-run
 不调用 `PersonInserter`，只检查流程和 trace：
 
 ```bash
+cd Computer-Graphics
 python3 orchestrator/scripts/run_react_demo.py --dry-run
 ```
 
@@ -77,6 +81,7 @@ trace=.../orchestrator/outputs/g1_p1/agent_trace.json
 调用当前 `Computer-Graphics/PersonInserter.py` 的 `find_insertion_patches(...)`：
 
 ```bash
+cd Computer-Graphics
 conda run -n check-numpy python orchestrator/scripts/run_react_demo.py
 ```
 
@@ -109,7 +114,7 @@ orchestrator/configs/demo_cases.json
 {
   "case_id": "g1_p1",
   "goal": "insert_person_into_group_photo",
-  "computer_graphics_root": "Computer-Graphics",
+  "computer_graphics_root": ".",
   "group_id": "g1",
   "person_id": "p1",
   "top_k": 5
@@ -123,6 +128,7 @@ orchestrator/configs/demo_cases.json
 工具入口：
 
 ```bash
+cd Computer-Graphics
 python3 orchestrator/scripts/run_tool.py <tool_name>
 ```
 
@@ -181,7 +187,24 @@ python3 orchestrator/scripts/run_tool.py vision.extract_metadata_from_masks --dr
   --params-json '{"masks_dir":"sam3_masks","contour_stride":1}'
 ```
 
-### 5.5 阶段 3 光照一致性 smoke test
+### 5.5 阶段 3 HSV 色调对齐
+
+对齐单人照相对合照人物 mask 区域的 HSV 色相和饱和度，输出对齐后人像和 JSON report：
+
+```bash
+conda run -n check-numpy python orchestrator/scripts/run_tool.py compositing.align_tone_hsv
+```
+
+输出：
+
+```text
+orchestrator/outputs/g1_p1/tone/g1_p1_hsv_aligned.png
+orchestrator/outputs/g1_p1/tone/g1_p1_hsv_report.json
+```
+
+对应 verifier：`orchestrator/src/orchestrator/verifiers/tone_verifier.py`。
+
+### 5.6 阶段 3 光照一致性 smoke test
 
 调用 `ImageCompositor.MRFImageCompositor` 在一个小 synthetic patch 上测试：
 
@@ -197,7 +220,7 @@ orchestrator/outputs/g1_p1/final/light_smoke.png
 orchestrator/outputs/g1_p1/final/light_smoke_report.json
 ```
 
-### 5.6 阶段 3 真实合成 top candidate
+### 5.7 阶段 3 真实合成 top candidate
 
 该步骤会比较耗时，因为会调用 MRF 合成：
 

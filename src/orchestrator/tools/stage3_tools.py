@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..schemas import CaseConfig, Observation
+from ..tool_runner import run_command
 
 
 def _import_current_modules(cg_root: Path):
@@ -54,7 +55,16 @@ def run_light_smoke(
         source[mask] = [0.32, 0.32, 0.32]
         source[~mask] = [1.0, 1.0, 1.0]
         boundary = binary_dilation(mask, iterations=1) & ~mask
-        result = compositor.compose(source, target, mask, boundary)
+        source_face_rgb = source[mask].reshape(-1, 1, 3)
+        target_face_rgb = [target[mask].reshape(-1, 1, 3)]
+        result = compositor.compose(
+            source,
+            target,
+            mask,
+            boundary,
+            source_face_rgb=source_face_rgb,
+            target_face_rgb=target_face_rgb,
+        )
         out_img = output_dir / "final" / "light_smoke.png"
         out_img.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray((np.clip(result, 0, 1) * 255).astype(np.uint8)).save(out_img)
@@ -65,6 +75,8 @@ def run_light_smoke(
             "tolerance": tolerance,
             "foreground_area": int(mask.sum()),
             "boundary_area": int(boundary.sum()),
+            "source_face_samples": int(source_face_rgb.shape[0]),
+            "target_face_sample_sets": len(target_face_rgb),
             "output_image": str(out_img),
         }
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -85,6 +97,8 @@ def compose_top_candidate(
     candidate_rank: int = 1,
     margin: int = 8,
     max_crop_size: int = 200,
+    preserve_detail: bool = True,
+    feather_px: float = 2.0,
     max_iter: int = 200,
     tolerance: float = 1e-4,
     **_: object,
@@ -104,6 +118,8 @@ def compose_top_candidate(
                     "candidate_rank": candidate_rank,
                     "margin": margin,
                     "max_crop_size": max_crop_size,
+                    "preserve_detail": preserve_detail,
+                    "feather_px": feather_px,
                     "max_iter": max_iter,
                     "tolerance": tolerance,
                 }
@@ -136,6 +152,8 @@ def compose_top_candidate(
             margin=margin,
             compositor=compositor,
             max_crop_size=max_crop_size,
+            preserve_detail=preserve_detail,
+            feather_px=feather_px,
         )
         final_dir.mkdir(parents=True, exist_ok=True)
         Image.fromarray((np.clip(result, 0, 1) * 255).astype(np.uint8)).save(final_img, quality=90)
@@ -145,13 +163,23 @@ def compose_top_candidate(
             "score": float(candidate.score),
             "scale": float(candidate.scale),
             "gap_bbox": [int(v) for v in candidate.gap_bbox],
-            "target_face_bbox": [int(v) for v in candidate.target_face_bbox],
             "margin": margin,
             "max_crop_size": max_crop_size,
+            "preserve_detail": preserve_detail,
+            "feather_px": feather_px,
             "max_iter": max_iter,
             "tolerance": tolerance,
             "final_image": str(final_img),
         }
+        target_face_bbox = getattr(candidate, "target_face_bbox", None)
+        if target_face_bbox is not None:
+            report["target_face_bbox"] = [int(v) for v in target_face_bbox]
+        source_face_rgb = getattr(candidate, "source_face_rgb", None)
+        target_face_rgb = getattr(candidate, "target_face_rgb", None)
+        if source_face_rgb is not None:
+            report["source_face_samples"] = int(getattr(source_face_rgb, "size", 0) // 3)
+        if target_face_rgb is not None:
+            report["target_face_sample_sets"] = len(target_face_rgb)
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return Observation(
             status="success",
@@ -161,3 +189,82 @@ def compose_top_candidate(
         )
     except Exception as exc:
         return Observation(status="failed", summary=f"compose_top_candidate failed: {exc!r}")
+
+
+def align_tone_hsv(
+    case: CaseConfig,
+    output_dir: Path,
+    dry_run: bool = False,
+    max_hue_shift_deg: float = 18.0,
+    min_saturation_ratio: float = 0.75,
+    max_saturation_ratio: float = 1.35,
+    value_strength: float = 0.0,
+    strength: float = 1.0,
+    min_valid_pixels: int = 128,
+    **_: object,
+) -> Observation:
+    """Run scripts/align_tone_hsv.py for the case person against masked group people."""
+    paths = case.paths()
+    tone_dir = output_dir / "tone"
+    output_image = tone_dir / f"{case.group_id}_{case.person_id}_hsv_aligned.png"
+    report_path = tone_dir / f"{case.group_id}_{case.person_id}_hsv_report.json"
+    person_mask = paths.person_sam3_dir / "instances" / "person_001.png"
+    group_mask_glob = paths.group_sam3_dir / "instances" / "person_*.png"
+
+    command = [
+        "python",
+        "scripts/align_tone_hsv.py",
+        "--source-image",
+        str(paths.person_image.relative_to(paths.cg_root)),
+        "--source-mask",
+        str(person_mask.relative_to(paths.cg_root)),
+        "--target-image",
+        str(paths.group_image.relative_to(paths.cg_root)),
+        "--target-mask-glob",
+        str(group_mask_glob.relative_to(paths.cg_root)),
+        "--output-image",
+        str(output_image),
+        "--report",
+        str(report_path),
+        "--max-hue-shift-deg",
+        str(max_hue_shift_deg),
+        "--min-saturation-ratio",
+        str(min_saturation_ratio),
+        "--max-saturation-ratio",
+        str(max_saturation_ratio),
+        "--value-strength",
+        str(value_strength),
+        "--strength",
+        str(strength),
+        "--min-valid-pixels",
+        str(min_valid_pixels),
+    ]
+
+    obs = run_command(command, cwd=paths.cg_root, dry_run=dry_run, timeout_s=300)
+    obs.artifacts.extend([str(output_image), str(report_path)])
+    obs.data.update({
+        "stage": "tone_alignment",
+        "method": "hsv",
+        "output_image": str(output_image),
+        "report": str(report_path),
+        "source_image": str(paths.person_image),
+        "source_mask": str(person_mask),
+        "target_image": str(paths.group_image),
+        "target_mask_glob": str(group_mask_glob),
+    })
+    if dry_run or obs.status != "success" or not report_path.exists():
+        return obs
+
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        obs.data.update(report)
+        correction = report.get("correction", {})
+        hue = correction.get("applied_hue_shift_deg", 0.0)
+        sat = correction.get("applied_saturation_ratio", 1.0)
+        warnings = report.get("warnings", [])
+        obs.summary = f"HSV tone alignment completed: hue_shift={hue}°, saturation_ratio={sat}."
+        if warnings:
+            obs.warnings.extend(str(w) for w in warnings)
+    except Exception as exc:
+        obs.warnings.append(f"could not parse HSV tone report: {exc!r}")
+    return obs

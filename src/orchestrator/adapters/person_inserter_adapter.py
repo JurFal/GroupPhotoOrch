@@ -19,12 +19,11 @@ def _import_person_inserter(cg_root: Path):
 
 
 def _candidate_summary(candidate: Any, rank: int) -> dict[str, Any]:
-    return {
+    summary = {
         "rank": rank,
         "score": float(candidate.score),
         "scale": float(candidate.scale),
         "offset_yx": [int(candidate.offset[0]), int(candidate.offset[1])],
-        "target_face_bbox_xywh": [int(v) for v in candidate.target_face_bbox],
         "gap_bbox_xyxy": [int(v) for v in candidate.gap_bbox],
         "neighbors": [int(v) for v in candidate.neighbors],
         "contour_points": int(len(candidate.contour)),
@@ -32,6 +31,17 @@ def _candidate_summary(candidate: Any, rank: int) -> dict[str, Any]:
         "source_size_hw": [int(candidate.source_rgb.shape[0]), int(candidate.source_rgb.shape[1])],
         "warnings": list(getattr(candidate, "warnings", [])),
     }
+    target_face_bbox = getattr(candidate, "target_face_bbox", None)
+    if target_face_bbox is not None:
+        summary["target_face_bbox_xywh"] = [int(v) for v in target_face_bbox]
+    source_face_rgb = getattr(candidate, "source_face_rgb", None)
+    if source_face_rgb is not None:
+        summary["source_face_samples"] = int(getattr(source_face_rgb, "size", 0) // 3)
+    target_face_rgb = getattr(candidate, "target_face_rgb", None)
+    if target_face_rgb is not None:
+        summary["target_face_sample_sets"] = len(target_face_rgb)
+        summary["target_face_samples"] = int(sum(getattr(x, "size", 0) // 3 for x in target_face_rgb))
+    return summary
 
 
 def find_candidates(case: CaseConfig, output_dir: Path, dry_run: bool = False) -> Observation:

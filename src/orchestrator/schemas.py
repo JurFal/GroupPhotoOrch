@@ -79,7 +79,7 @@ class CaseConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], base_dir: Path) -> "CaseConfig":
-        root = Path(data.get("computer_graphics_root", "Computer-Graphics"))
+        root = Path(data.get("computer_graphics_root", "."))
         if not root.is_absolute():
             root = base_dir / root
         return cls(

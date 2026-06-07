@@ -29,6 +29,11 @@
       "mode": "python_adapter",
       "stage": "geometry_insertion"
     },
+    "compositing.align_tone_hsv": {
+      "description": "Run scripts/align_tone_hsv.py to align the individual person's HSV tone to masked group-photo people.",
+      "mode": "command_tool",
+      "stage": "stage3_tone_alignment"
+    },
     "compositing.run_light_smoke": {
       "description": "Run ImageCompositor.MRFImageCompositor on a tiny synthetic patch to validate the light-consistency prototype.",
       "mode": "python_adapter",

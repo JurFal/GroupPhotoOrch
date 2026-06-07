@@ -13,10 +13,12 @@ from .schemas import AgentTrace, CaseConfig, Decision, Observation, ToolAction, 
 from .trace import write_trace
 from .tools.toolbox import ToolBox
 from .verifiers.insertion_verifier import verify_candidate_summaries
+from .verifiers.tone_verifier import verify_hsv_tone_alignment
 from .verifiers.vision_verifier import verify_existing_artifacts
 
 
 DEFAULT_LLM_ALLOWED_TOOLS = [
+    "compositing.align_tone_hsv",
     "compositing.run_light_smoke",
     "compositing.compose_top_candidate",
     "vision.extract_metadata_from_masks",
@@ -75,7 +77,7 @@ class ReActOrchestrator:
         # Step 2: find insertion candidates through PersonInserter adapter.
         obs2 = self.tools.call("insertion.find_candidates", case, output_dir=case_output, dry_run=dry_run)
         ver2 = verify_candidate_summaries(obs2)
-        dec2 = decide_after_verification("insertion", ver2, pass_next="ready_for_optional_compositing")
+        dec2 = decide_after_verification("insertion", ver2, pass_next="align_tone")
         trace.steps.append(TraceStep(
             index=2,
             thought="Use the current PersonInserter interface to generate candidate patches; serialize only lightweight summaries.",
@@ -85,7 +87,27 @@ class ReActOrchestrator:
             decision=dec2,
         ))
 
-        if dec2.next == "ready_for_optional_compositing":
+        latest_verification = ver2
+        if dec2.next == "align_tone":
+            obs3 = self.tools.call("compositing.align_tone_hsv", case, output_dir=case_output, dry_run=dry_run)
+            ver3 = verify_hsv_tone_alignment(obs3)
+            dec3 = decide_after_verification("tone_alignment", ver3, pass_next="ready_for_optional_compositing")
+            trace.steps.append(TraceStep(
+                index=3,
+                thought="Align the inserted person's HSV tone against masked people in the group photo before optional final compositing.",
+                action=ToolAction(tool="compositing.align_tone_hsv", params={"case_id": case.case_id}),
+                observation=obs3,
+                verification=ver3,
+                decision=dec3,
+            ))
+            latest_verification = ver3
+            if dec3.next == "ready_for_optional_compositing":
+                trace.final_status = "success_dry_run" if dry_run else "tone_aligned"
+            elif dec3.next == "revise_or_stop":
+                trace.final_status = "needs_tone_alignment_revision"
+            else:
+                trace.final_status = "failed"
+        elif dec2.next == "ready_for_optional_compositing":
             trace.final_status = "success_dry_run" if dry_run else "candidates_ready"
         elif dec2.next == "revise_or_stop":
             trace.final_status = "needs_insertion_revision"
@@ -98,7 +120,7 @@ class ReActOrchestrator:
                 trace=trace,
                 case=case,
                 case_output=case_output,
-                latest_verification=ver2,
+                latest_verification=latest_verification,
                 allowed_tools=llm_allowed_tools or DEFAULT_LLM_ALLOWED_TOOLS,
                 execute_tool=execute_llm_tool,
                 dry_run=dry_run,
