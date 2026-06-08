@@ -46,10 +46,21 @@ cd Computer-Graphics
 python orchestrator/scripts/run_tool.py vision.generate_sam3_masks --dry-run
 python orchestrator/scripts/run_tool.py vision.generate_yolo_person_masks --dry-run
 python orchestrator/scripts/run_tool.py vision.extract_metadata_from_masks --dry-run
+conda run -n check-numpy python orchestrator/scripts/run_tool.py geometry.find_insertion_candidates
 conda run -n check-numpy python orchestrator/scripts/run_tool.py compositing.align_tone_hsv
 conda run -n check-numpy python orchestrator/scripts/run_tool.py compositing.run_light_smoke
 conda run -n check-numpy python orchestrator/scripts/run_tool.py compositing.compose_top_candidate --dry-run
 ```
+
+Stage split:
+
+- `stage2_tools.py`: geometry and insertion planning through `PersonInserter.find_insertion_patches`.
+- `stage3_tools.py`: HSV tone alignment, MRF light smoke, and final MRF compositing.
+- `insertion.find_candidates` remains as a backward-compatible alias for `geometry.find_insertion_candidates`.
+
+Stage 2 writes lightweight summaries plus cached patch artifacts under
+`orchestrator/outputs/<case>/insertion/patches/`. Stage 3 prefers those cached
+patches, so final MRF compositing does not rerun geometry planning.
 
 Tool-specific parameters can be passed with `--params-json`:
 

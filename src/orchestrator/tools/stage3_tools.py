@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 import sys
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
+from ..adapters.person_inserter_adapter import load_candidate_patch
 from ..schemas import CaseConfig, Observation
 from ..tool_runner import run_command
 
@@ -57,14 +60,16 @@ def run_light_smoke(
         boundary = binary_dilation(mask, iterations=1) & ~mask
         source_face_rgb = source[mask].reshape(-1, 1, 3)
         target_face_rgb = [target[mask].reshape(-1, 1, 3)]
-        result = compositor.compose(
-            source,
-            target,
-            mask,
-            boundary,
-            source_face_rgb=source_face_rgb,
-            target_face_rgb=target_face_rgb,
-        )
+        compose_stdout = StringIO()
+        with redirect_stdout(compose_stdout):
+            result = compositor.compose(
+                source,
+                target,
+                mask,
+                boundary,
+                source_face_rgb=source_face_rgb,
+                target_face_rgb=target_face_rgb,
+            )
         out_img = output_dir / "final" / "light_smoke.png"
         out_img.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray((np.clip(result, 0, 1) * 255).astype(np.uint8)).save(out_img)
@@ -78,6 +83,7 @@ def run_light_smoke(
             "source_face_samples": int(source_face_rgb.shape[0]),
             "target_face_sample_sets": len(target_face_rgb),
             "output_image": str(out_img),
+            "compose_stdout": compose_stdout.getvalue().strip(),
         }
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return Observation(
@@ -103,7 +109,7 @@ def compose_top_candidate(
     tolerance: float = 1e-4,
     **_: object,
 ) -> Observation:
-    """Find candidates and run PersonInserter.compose_and_paste on one candidate."""
+    """Run MRF final compositing for one stage-2 insertion candidate."""
     paths = case.paths()
     final_dir = output_dir / "final"
     final_img = final_dir / f"{case.group_id}_{case.person_id}_candidate_{candidate_rank}.jpg"
@@ -116,6 +122,7 @@ def compose_top_candidate(
             data={
                 "planned": {
                     "candidate_rank": candidate_rank,
+                    "stage2_summary": str(output_dir / "insertion" / "candidate_summaries.json"),
                     "margin": margin,
                     "max_crop_size": max_crop_size,
                     "preserve_detail": preserve_detail,
@@ -131,35 +138,59 @@ def compose_top_candidate(
         from PIL import Image, ImageOps
 
         ImageCompositor, PersonInserter = _import_current_modules(paths.cg_root)
-        candidates = PersonInserter.find_insertion_patches(
-            group_meta_path=paths.group_meta,
-            group_image_path=paths.group_image,
-            individual_meta_path=paths.person_meta,
-            individual_image_path=paths.person_image,
-            top_k=max(candidate_rank, case.top_k),
-        )
-        if len(candidates) < candidate_rank:
-            return Observation(status="failed", summary=f"candidate rank {candidate_rank} not available")
-        candidate = candidates[candidate_rank - 1]
+        summary_path = output_dir / "insertion" / "candidate_summaries.json"
+        stage2_candidate_summary: dict[str, Any] | None = None
+        if summary_path.exists():
+            summaries = json.loads(summary_path.read_text(encoding="utf-8"))
+            if isinstance(summaries, list) and len(summaries) >= candidate_rank:
+                item = summaries[candidate_rank - 1]
+                if isinstance(item, dict):
+                    stage2_candidate_summary = item
         group_rgb = np.asarray(
             ImageOps.exif_transpose(Image.open(paths.group_image)).convert("RGB"),
             dtype=np.float32,
         ) / 255.0
+        patch_artifact = None
+        if stage2_candidate_summary is not None:
+            raw_patch_artifact = stage2_candidate_summary.get("patch_artifact")
+            if isinstance(raw_patch_artifact, str) and raw_patch_artifact:
+                patch_artifact = Path(raw_patch_artifact)
+        if patch_artifact is not None and patch_artifact.exists():
+            candidate = load_candidate_patch(patch_artifact, group_rgb, PersonInserter)
+            loaded_from_cache = True
+        else:
+            candidates = PersonInserter.find_insertion_patches(
+                group_meta_path=paths.group_meta,
+                group_image_path=paths.group_image,
+                individual_meta_path=paths.person_meta,
+                individual_image_path=paths.person_image,
+                top_k=max(candidate_rank, case.top_k),
+            )
+            if len(candidates) < candidate_rank:
+                return Observation(status="failed", summary=f"candidate rank {candidate_rank} not available")
+            candidate = candidates[candidate_rank - 1]
+            loaded_from_cache = False
         compositor = ImageCompositor.MRFImageCompositor(max_iter=max_iter, tolerance=tolerance)
-        result = PersonInserter.compose_and_paste(
-            group_rgb,
-            candidate,
-            margin=margin,
-            compositor=compositor,
-            max_crop_size=max_crop_size,
-            preserve_detail=preserve_detail,
-            feather_px=feather_px,
-        )
+        compose_stdout = StringIO()
+        with redirect_stdout(compose_stdout):
+            result = PersonInserter.compose_and_paste(
+                group_rgb,
+                candidate,
+                margin=margin,
+                compositor=compositor,
+                max_crop_size=max_crop_size,
+                preserve_detail=preserve_detail,
+                feather_px=feather_px,
+            )
         final_dir.mkdir(parents=True, exist_ok=True)
         Image.fromarray((np.clip(result, 0, 1) * 255).astype(np.uint8)).save(final_img, quality=90)
         report = {
             "status": "success",
             "candidate_rank": candidate_rank,
+            "stage2_summary": str(summary_path),
+            "used_stage2_summary": stage2_candidate_summary is not None,
+            "loaded_candidate_patch_cache": loaded_from_cache,
+            "patch_artifact": str(patch_artifact) if patch_artifact is not None else "",
             "score": float(candidate.score),
             "scale": float(candidate.scale),
             "gap_bbox": [int(v) for v in candidate.gap_bbox],
@@ -170,6 +201,7 @@ def compose_top_candidate(
             "max_iter": max_iter,
             "tolerance": tolerance,
             "final_image": str(final_img),
+            "compose_stdout": compose_stdout.getvalue().strip(),
         }
         target_face_bbox = getattr(candidate, "target_face_bbox", None)
         if target_face_bbox is not None:
@@ -180,6 +212,8 @@ def compose_top_candidate(
             report["source_face_samples"] = int(getattr(source_face_rgb, "size", 0) // 3)
         if target_face_rgb is not None:
             report["target_face_sample_sets"] = len(target_face_rgb)
+        if stage2_candidate_summary is not None:
+            report["stage2_candidate"] = stage2_candidate_summary
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return Observation(
             status="success",

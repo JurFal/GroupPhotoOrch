@@ -75,13 +75,13 @@ class ReActOrchestrator:
             return trace
 
         # Step 2: find insertion candidates through PersonInserter adapter.
-        obs2 = self.tools.call("insertion.find_candidates", case, output_dir=case_output, dry_run=dry_run)
+        obs2 = self.tools.call("geometry.find_insertion_candidates", case, output_dir=case_output, dry_run=dry_run)
         ver2 = verify_candidate_summaries(obs2)
         dec2 = decide_after_verification("insertion", ver2, pass_next="align_tone")
         trace.steps.append(TraceStep(
             index=2,
             thought="Use the current PersonInserter interface to generate candidate patches; serialize only lightweight summaries.",
-            action=ToolAction(tool="insertion.find_candidates", params={"top_k": case.top_k}),
+            action=ToolAction(tool="geometry.find_insertion_candidates", params={"top_k": case.top_k}),
             observation=obs2,
             verification=ver2,
             decision=dec2,

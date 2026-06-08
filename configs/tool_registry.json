@@ -10,24 +10,37 @@
       "mode": "command_tool",
       "stage": "stage1_perception",
       "expensive": true,
-      "requires": ["sam3", "checkpoint_or_hf_download", "torch"]
+      "requires": [
+        "sam3",
+        "checkpoint_or_hf_download",
+        "torch"
+      ]
     },
     "vision.generate_yolo_person_masks": {
       "description": "Run Computer-Graphics/scripts/generate_yolo_person_masks.py as local person segmentation fallback.",
       "mode": "command_tool",
       "stage": "stage1_perception",
       "expensive": true,
-      "requires": ["ultralytics", "model_weights"]
+      "requires": [
+        "ultralytics",
+        "model_weights"
+      ]
     },
     "vision.extract_metadata_from_masks": {
       "description": "Run Computer-Graphics/scripts/extract_metadata_from_sam3.py on SAM3/YOLO instance-mask layout.",
       "mode": "command_tool",
       "stage": "stage1_perception"
     },
-    "insertion.find_candidates": {
-      "description": "Call PersonInserter.find_insertion_patches and serialize lightweight candidate summaries.",
+    "geometry.find_insertion_candidates": {
+      "description": "Call PersonInserter.find_insertion_patches for stage-2 geometry gap planning and serialize lightweight candidate summaries.",
       "mode": "python_adapter",
-      "stage": "geometry_insertion"
+      "stage": "stage2_geometry_insertion"
+    },
+    "insertion.find_candidates": {
+      "description": "Backward-compatible alias for geometry.find_insertion_candidates.",
+      "mode": "python_adapter",
+      "stage": "stage2_geometry_insertion_alias",
+      "alias_for": "geometry.find_insertion_candidates"
     },
     "compositing.align_tone_hsv": {
       "description": "Run scripts/align_tone_hsv.py to align the individual person's HSV tone to masked group-photo people.",

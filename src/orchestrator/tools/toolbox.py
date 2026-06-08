@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..schemas import CaseConfig, Observation
-from . import insertion_tools, stage1_tools, stage3_tools, vision_tools
+from . import stage1_tools, stage2_tools, stage3_tools, vision_tools
 
 ToolFn = Callable[..., Observation]
 
@@ -19,7 +19,7 @@ class ToolBox:
             "vision.generate_sam3_masks": stage1_tools.generate_sam3_masks,
             "vision.generate_yolo_person_masks": stage1_tools.generate_yolo_person_masks,
             "vision.extract_metadata_from_masks": stage1_tools.extract_metadata_from_masks,
-            "insertion.find_candidates": insertion_tools.find_candidates,
+            "geometry.find_insertion_candidates": stage2_tools.find_insertion_candidates,
             "compositing.align_tone_hsv": stage3_tools.align_tone_hsv,
             "compositing.run_light_smoke": stage3_tools.run_light_smoke,
             "compositing.compose_top_candidate": stage3_tools.compose_top_candidate,
