@@ -83,6 +83,7 @@ def run_light_smoke(
             "source_face_samples": int(source_face_rgb.shape[0]),
             "target_face_sample_sets": len(target_face_rgb),
             "output_image": str(out_img),
+            "mrf_report": dict(getattr(compositor, "last_report", {}) or {}),
             "compose_stdout": compose_stdout.getvalue().strip(),
         }
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -107,6 +108,7 @@ def compose_top_candidate(
     feather_px: float = 2.0,
     max_iter: int = 200,
     tolerance: float = 1e-4,
+    use_active_solve: bool = True,
     **_: object,
 ) -> Observation:
     """Run MRF final compositing for one stage-2 insertion candidate."""
@@ -129,6 +131,7 @@ def compose_top_candidate(
                     "feather_px": feather_px,
                     "max_iter": max_iter,
                     "tolerance": tolerance,
+                    "use_active_solve": use_active_solve,
                 }
             },
         )
@@ -181,6 +184,7 @@ def compose_top_candidate(
                 max_crop_size=max_crop_size,
                 preserve_detail=preserve_detail,
                 feather_px=feather_px,
+                use_active_solve=use_active_solve,
             )
         final_dir.mkdir(parents=True, exist_ok=True)
         Image.fromarray((np.clip(result, 0, 1) * 255).astype(np.uint8)).save(final_img, quality=90)
@@ -200,6 +204,8 @@ def compose_top_candidate(
             "feather_px": feather_px,
             "max_iter": max_iter,
             "tolerance": tolerance,
+            "use_active_solve": use_active_solve,
+            "mrf_report": dict(getattr(compositor, "last_report", {}) or {}),
             "final_image": str(final_img),
             "compose_stdout": compose_stdout.getvalue().strip(),
         }

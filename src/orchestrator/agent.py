@@ -13,6 +13,7 @@ from .schemas import AgentTrace, CaseConfig, Decision, Observation, ToolAction, 
 from .trace import write_trace
 from .tools.toolbox import ToolBox
 from .verifiers.insertion_verifier import verify_candidate_summaries
+from .verifiers.lighting_verifier import choose_mrf_params, verify_lighting_plan, verify_mrf_composite
 from .verifiers.tone_verifier import verify_hsv_tone_alignment
 from .verifiers.vision_verifier import verify_existing_artifacts
 
@@ -91,18 +92,52 @@ class ReActOrchestrator:
         if dec2.next == "align_tone":
             obs3 = self.tools.call("compositing.align_tone_hsv", case, output_dir=case_output, dry_run=dry_run)
             ver3 = verify_hsv_tone_alignment(obs3)
-            dec3 = decide_after_verification("tone_alignment", ver3, pass_next="ready_for_optional_compositing")
+            dec3 = decide_after_verification("tone_alignment", ver3, pass_next="plan_mrf_compositing")
             trace.steps.append(TraceStep(
                 index=3,
-                thought="Align the inserted person's HSV tone against masked people in the group photo before optional final compositing.",
+                thought="Align the inserted person's HSV tone against masked people in the group photo before final MRF compositing.",
                 action=ToolAction(tool="compositing.align_tone_hsv", params={"case_id": case.case_id}),
                 observation=obs3,
                 verification=ver3,
                 decision=dec3,
             ))
             latest_verification = ver3
-            if dec3.next == "ready_for_optional_compositing":
-                trace.final_status = "success_dry_run" if dry_run else "tone_aligned"
+            if dec3.next == "plan_mrf_compositing":
+                ver4 = verify_lighting_plan(obs3, obs2)
+                mrf_params = choose_mrf_params(obs3, obs2)
+                dec4 = decide_after_verification("lighting_plan", ver4, pass_next="compose_top_candidate")
+                trace.steps.append(TraceStep(
+                    index=4,
+                    thought="HSV fixes color temperature/tone, but MRF is still needed to smooth local illumination into the group lighting.",
+                    action=ToolAction(tool="lighting.verify_and_budget_mrf", params={"case_id": case.case_id}),
+                    observation=Observation(
+                        status="success",
+                        summary=f"Lighting verifier selected MRF budget: max_iter={mrf_params['max_iter']}, max_crop_size={mrf_params['max_crop_size']}.",
+                        data={"mrf_params": mrf_params},
+                    ),
+                    verification=ver4,
+                    decision=dec4,
+                ))
+                latest_verification = ver4
+
+                obs5 = self.tools.call("compositing.compose_top_candidate", case, output_dir=case_output, dry_run=dry_run, **mrf_params)
+                ver5 = verify_mrf_composite(obs5)
+                dec5 = decide_after_verification("mrf_compositing", ver5, pass_next="final_composite_ready")
+                trace.steps.append(TraceStep(
+                    index=5,
+                    thought="Execute final ImageCompositor MRF pass with the verifier-selected iteration budget.",
+                    action=ToolAction(tool="compositing.compose_top_candidate", params=mrf_params),
+                    observation=obs5,
+                    verification=ver5,
+                    decision=dec5,
+                ))
+                latest_verification = ver5
+                if dec5.next == "final_composite_ready":
+                    trace.final_status = "success_dry_run" if dry_run else "mrf_composed"
+                elif dec5.next == "revise_or_stop":
+                    trace.final_status = "needs_mrf_revision"
+                else:
+                    trace.final_status = "failed"
             elif dec3.next == "revise_or_stop":
                 trace.final_status = "needs_tone_alignment_revision"
             else:

@@ -204,6 +204,8 @@ orchestrator/outputs/g1_p1/tone/g1_p1_hsv_report.json
 
 对应 verifier：`orchestrator/src/orchestrator/verifiers/tone_verifier.py`。
 
+注意：HSV 只作为色温/色调预对齐。完整 Agent 流程不会在 HSV 后停止，而是继续进入光照验证器，再运行 MRF 做局部亮度一致合成。
+
 ### 5.6 阶段 3 光照一致性 smoke test
 
 调用 `ImageCompositor.MRFImageCompositor` 在一个小 synthetic patch 上测试：
@@ -226,7 +228,7 @@ orchestrator/outputs/g1_p1/final/light_smoke_report.json
 
 ```bash
 conda run -n check-numpy python orchestrator/scripts/run_tool.py compositing.compose_top_candidate \
-  --params-json '{"candidate_rank":1,"max_iter":200,"max_crop_size":200}'
+  --params-json '{"candidate_rank":1,"max_iter":24,"max_crop_size":140,"use_active_solve":true}'
 ```
 
 如果只想检查计划，不真实合成：
@@ -309,10 +311,10 @@ python3 orchestrator/scripts/run_llm_smoke.py \
 
 ## 7. 当前 Agent 的能力边界
 
-当前默认 ReAct demo 仍然是规则型流程：
+当前默认 ReAct demo 仍然是规则型流程，但会自动完成最终 MRF 合成：
 
 ```text
-检查已有感知产物 -> Stage 2 几何候选 -> Stage 3 HSV 色调对齐 -> verifier -> trace
+检查已有感知产物 -> Stage 2 几何候选 -> Stage 3 HSV 色调对齐 -> 光照 verifier 决定 MRF 迭代预算 -> MRF 合成 -> trace
 ```
 
 LLM client 已经接入，但默认主流程还没有让 LLM 自动决定下一步。后续可以把 LLM 接入 `llm_decision_policy.py`，让它在白名单工具中选择下一步，例如：
@@ -329,9 +331,12 @@ compositing.compose_top_candidate
 
 - `stage2_tools.py`：只做几何和插入候选规划，调用 `PersonInserter.find_insertion_patches`，不跑 MRF。
 - `stage3_tools.py`：只做图像处理输出，包括 HSV 色调对齐、MRF smoke test、最终 MRF 合成。
+- `lighting_verifier.py`：HSV 后强制规划一次最终 MRF，并根据色调偏差、候选区域大小自主选择较小的 `max_iter` / `max_crop_size`。
 - `insertion.find_candidates` 保留为旧名字兼容别名，推荐新调用使用 `geometry.find_insertion_candidates`。
 
 Stage 2 会在 `orchestrator/outputs/<case>/insertion/patches/` 写入候选 patch 缓存。Stage 3 优先读取这些缓存，因此最终 MRF 合成不需要重新跑几何候选规划。
+
+底层 `ImageCompositor` 默认启用局部 active-mask 稀疏矩阵（`use_active_solve=true`），只在前景和边界局部像素上做 LLGC 迭代，减少整块裁片背景参与矩阵计算的开销。
 
 这样可以从固定流程升级为 LLM-assisted ReAct Agent。
 
