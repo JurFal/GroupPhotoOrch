@@ -28,6 +28,11 @@ def _candidate_summary(candidate: Any, rank: int) -> dict[str, Any]:
         "neighbors": [int(v) for v in candidate.neighbors],
         "contour_points": int(len(candidate.contour)),
         "refined_area": int(candidate.refined_mask.sum()),
+        "source_mask_area": int(candidate.source_mask.sum()),
+        "original_source_mask_area": int(getattr(candidate, "original_source_mask_area", candidate.source_mask.sum())),
+        "occluded_source_pixels": int(getattr(candidate, "occluded_source_pixels", 0)),
+        "occlusion_ratio": float(getattr(candidate, "occlusion_ratio", 0.0)),
+        "side_score": float(getattr(candidate, "side_score", 0.0)),
         "source_size_hw": [int(candidate.source_rgb.shape[0]), int(candidate.source_rgb.shape[1])],
         "warnings": list(getattr(candidate, "warnings", [])),
     }
@@ -60,6 +65,10 @@ def _save_candidate_patch(candidate: Any, rank: int, patch_path: Path) -> None:
         "score": float(candidate.score),
         "neighbors": [int(v) for v in candidate.neighbors],
         "warnings": list(getattr(candidate, "warnings", [])),
+        "original_source_mask_area": int(getattr(candidate, "original_source_mask_area", candidate.source_mask.sum())),
+        "occluded_source_pixels": int(getattr(candidate, "occluded_source_pixels", 0)),
+        "occlusion_ratio": float(getattr(candidate, "occlusion_ratio", 0.0)),
+        "side_score": float(getattr(candidate, "side_score", 0.0)),
         "target_face_rgb_count": len(getattr(candidate, "target_face_rgb", [])),
         "source_mask_shape": list(candidate.source_mask.shape),
         "refined_mask_shape": list(candidate.refined_mask.shape),
@@ -125,14 +134,25 @@ def load_candidate_patch(patch_path: Path, target_rgb: Any, person_inserter: Any
             gap_bbox=[int(v) for v in meta["gap_bbox"]],
             score=float(meta["score"]),
             neighbors=[int(v) for v in meta.get("neighbors", [])],
+            original_source_mask_area=int(meta.get("original_source_mask_area", source_mask.sum())),
+            occluded_source_pixels=int(meta.get("occluded_source_pixels", 0)),
+            occlusion_ratio=float(meta.get("occlusion_ratio", 0.0)),
+            side_score=float(meta.get("side_score", 0.0)),
             warnings=list(meta.get("warnings", [])),
         )
 
 
-def find_candidates(case: CaseConfig, output_dir: Path, dry_run: bool = False) -> Observation:
+def find_candidates(
+    case: CaseConfig,
+    output_dir: Path,
+    dry_run: bool = False,
+    top_k: int | None = None,
+    **_: object,
+) -> Observation:
     paths = case.paths()
     summary_path = output_dir / "insertion" / "candidate_summaries.json"
     patch_dir = output_dir / "insertion" / "patches"
+    requested_top_k = int(top_k or case.top_k)
 
     if dry_run:
         planned = {
@@ -140,7 +160,7 @@ def find_candidates(case: CaseConfig, output_dir: Path, dry_run: bool = False) -
             "group_image_path": str(paths.group_image),
             "individual_meta_path": str(paths.person_meta),
             "individual_image_path": str(paths.person_image),
-            "top_k": case.top_k,
+            "top_k": requested_top_k,
             "patch_dir": str(patch_dir),
         }
         return Observation(
@@ -157,7 +177,7 @@ def find_candidates(case: CaseConfig, output_dir: Path, dry_run: bool = False) -
             group_image_path=paths.group_image,
             individual_meta_path=paths.person_meta,
             individual_image_path=paths.person_image,
-            top_k=case.top_k,
+            top_k=requested_top_k,
         )
     except Exception as exc:
         return Observation(status="failed", summary=f"find_insertion_patches failed: {exc!r}")

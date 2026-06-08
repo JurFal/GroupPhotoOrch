@@ -7,6 +7,13 @@ from typing import Any
 from ..schemas import Observation, Verification
 
 
+def _candidate_count(candidate_observation: Observation | None) -> int:
+    if candidate_observation is None:
+        return 0
+    candidates = candidate_observation.data.get("candidates", [])
+    return len(candidates) if isinstance(candidates, list) else 0
+
+
 def choose_mrf_params(
     tone_observation: Observation,
     candidate_observation: Observation | None = None,
@@ -73,7 +80,9 @@ def verify_lighting_plan(
         )
 
     params = choose_mrf_params(tone_observation, candidate_observation)
-    action = {"action": "compositing.compose_top_candidate", "params": params}
+    params.pop("candidate_rank", None)
+    params["candidate_count"] = _candidate_count(candidate_observation)
+    action = {"action": "compositing.compose_all_candidates", "params": params}
     return Verification(
         stage="lighting_plan",
         status="pass",
@@ -97,24 +106,56 @@ def verify_mrf_composite(observation: Observation) -> Verification:
     problems: list[str] = []
     actions: list[dict[str, Any]] = []
     data = observation.data
-    final_image = str(data.get("final_image", ""))
-    if not final_image or not Path(final_image).exists():
-        problems.append("final MRF composite image is missing")
-        actions.append({"action": "rerun_compositing.compose_top_candidate"})
-
-    report = data.get("mrf_report", {}) if isinstance(data.get("mrf_report", {}), dict) else {}
-    if report:
-        active_ratio = float(report.get("active_ratio", 1.0))
-        actual_iterations = int(report.get("actual_iterations", 0))
-        max_iter = int(report.get("max_iter", data.get("max_iter", 0)))
-        if str(report.get("solve_mode", "")) != "active":
-            actions.append({"action": "enable_use_active_solve"})
-        if active_ratio > 0.75:
-            actions.append({"action": "tighten_crop_or_mask_to_reduce_active_area"})
-        if max_iter > 0 and actual_iterations >= max_iter:
-            actions.append({"action": "allow_more_iterations_if_quality_is_insufficient"})
+    if isinstance(data.get("candidates"), list):
+        candidate_results = data["candidates"]
+        if not candidate_results:
+            problems.append("all-candidate MRF composite report has no candidates")
+            actions.append({"action": "rerun_compositing.compose_all_candidates"})
+        for item in candidate_results:
+            if not isinstance(item, dict):
+                problems.append("candidate composite result is not an object")
+                continue
+            rank = item.get("candidate_rank", "?")
+            if item.get("status") != "success":
+                problems.append(f"candidate #{rank} composite failed: {item.get('summary', '')}")
+                actions.append({"action": "rerun_compositing.compose_all_candidates"})
+                continue
+            final_image = str(item.get("final_image", ""))
+            if not final_image or not Path(final_image).exists():
+                problems.append(f"candidate #{rank} final MRF composite image is missing")
+                actions.append({"action": "rerun_compositing.compose_all_candidates"})
+            report = item.get("mrf_report", {}) if isinstance(item.get("mrf_report", {}), dict) else {}
+            if report:
+                active_ratio = float(report.get("active_ratio", 1.0))
+                actual_iterations = int(report.get("actual_iterations", 0))
+                max_iter = int(report.get("max_iter", data.get("max_iter", 0)))
+                if str(report.get("solve_mode", "")) != "active":
+                    actions.append({"action": "enable_use_active_solve"})
+                if active_ratio > 0.75:
+                    actions.append({"action": "tighten_crop_or_mask_to_reduce_active_area", "candidate_rank": rank})
+                if max_iter > 0 and actual_iterations >= max_iter:
+                    actions.append({"action": "allow_more_iterations_if_quality_is_insufficient", "candidate_rank": rank})
+            else:
+                actions.append({"action": "expose_mrf_report_metadata", "candidate_rank": rank})
     else:
-        actions.append({"action": "expose_mrf_report_metadata"})
+        final_image = str(data.get("final_image", ""))
+        if not final_image or not Path(final_image).exists():
+            problems.append("final MRF composite image is missing")
+            actions.append({"action": "rerun_compositing.compose_top_candidate"})
+
+        report = data.get("mrf_report", {}) if isinstance(data.get("mrf_report", {}), dict) else {}
+        if report:
+            active_ratio = float(report.get("active_ratio", 1.0))
+            actual_iterations = int(report.get("actual_iterations", 0))
+            max_iter = int(report.get("max_iter", data.get("max_iter", 0)))
+            if str(report.get("solve_mode", "")) != "active":
+                actions.append({"action": "enable_use_active_solve"})
+            if active_ratio > 0.75:
+                actions.append({"action": "tighten_crop_or_mask_to_reduce_active_area"})
+            if max_iter > 0 and actual_iterations >= max_iter:
+                actions.append({"action": "allow_more_iterations_if_quality_is_insufficient"})
+        else:
+            actions.append({"action": "expose_mrf_report_metadata"})
 
     score = 1.0 if not problems else max(0.0, 1.0 - 0.3 * len(problems))
     return Verification(

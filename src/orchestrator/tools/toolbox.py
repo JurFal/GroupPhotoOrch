@@ -23,6 +23,7 @@ class ToolBox:
             "compositing.align_tone_hsv": stage3_tools.align_tone_hsv,
             "compositing.run_light_smoke": stage3_tools.run_light_smoke,
             "compositing.compose_top_candidate": stage3_tools.compose_top_candidate,
+            "compositing.compose_all_candidates": stage3_tools.compose_all_candidates,
         }
 
     def names(self) -> list[str]:

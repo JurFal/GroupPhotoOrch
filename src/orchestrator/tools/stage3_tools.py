@@ -231,6 +231,103 @@ def compose_top_candidate(
         return Observation(status="failed", summary=f"compose_top_candidate failed: {exc!r}")
 
 
+def compose_all_candidates(
+    case: CaseConfig,
+    output_dir: Path,
+    dry_run: bool = False,
+    candidate_count: int | None = None,
+    **params: object,
+) -> Observation:
+    """Run MRF final compositing for every serialized stage-2 insertion candidate."""
+    summary_path = output_dir / "insertion" / "candidate_summaries.json"
+    final_dir = output_dir / "final"
+    if candidate_count is None:
+        candidate_count = case.top_k
+        if summary_path.exists():
+            try:
+                summaries = json.loads(summary_path.read_text(encoding="utf-8"))
+                if isinstance(summaries, list):
+                    candidate_count = len(summaries)
+            except Exception:
+                candidate_count = case.top_k
+    candidate_count = max(0, int(candidate_count))
+
+    if dry_run:
+        planned = []
+        for rank in range(1, candidate_count + 1):
+            planned.append({
+                "candidate_rank": rank,
+                "final_image": str(final_dir / f"{case.group_id}_{case.person_id}_candidate_{rank}.jpg"),
+                "report": str(final_dir / f"{case.group_id}_{case.person_id}_candidate_{rank}_report.json"),
+            })
+        return Observation(
+            status="skipped",
+            summary=f"Dry run: all-candidate compositing planned for {candidate_count} candidate(s).",
+            artifacts=[item["final_image"] for item in planned] + [item["report"] for item in planned],
+            data={"planned_candidates": planned, "candidate_count": candidate_count, "params": dict(params)},
+        )
+
+    if candidate_count <= 0:
+        return Observation(
+            status="failed",
+            summary="compose_all_candidates failed: no candidate summaries available",
+            data={"stage2_summary": str(summary_path), "candidate_count": candidate_count},
+        )
+
+    artifacts: list[str] = []
+    results: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    for rank in range(1, candidate_count + 1):
+        rank_params = dict(params)
+        rank_params["candidate_rank"] = rank
+        obs = compose_top_candidate(case, output_dir, dry_run=False, **rank_params)
+        artifacts.extend(obs.artifacts)
+        result = {
+            "candidate_rank": rank,
+            "status": obs.status,
+            "summary": obs.summary,
+            "artifacts": obs.artifacts,
+        }
+        if obs.status == "success":
+            result.update({
+                "final_image": obs.data.get("final_image", ""),
+                "report": obs.artifacts[1] if len(obs.artifacts) > 1 else "",
+                "score": obs.data.get("score", 0.0),
+                "scale": obs.data.get("scale", 0.0),
+                "mrf_report": obs.data.get("mrf_report", {}),
+            })
+        else:
+            failures.append(result)
+        results.append(result)
+
+    report_path = final_dir / f"{case.group_id}_{case.person_id}_all_candidates_report.json"
+    report = {
+        "status": "success" if not failures else "failed",
+        "candidate_count": candidate_count,
+        "composed_count": candidate_count - len(failures),
+        "failed_count": len(failures),
+        "stage2_summary": str(summary_path),
+        "candidates": results,
+    }
+    final_dir.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    artifacts.append(str(report_path))
+
+    if failures:
+        return Observation(
+            status="failed",
+            summary=f"Composed {candidate_count - len(failures)}/{candidate_count} candidate(s); failures remain.",
+            artifacts=artifacts,
+            data=report,
+        )
+    return Observation(
+        status="success",
+        summary=f"Composed all {candidate_count} candidate(s) with ImageCompositor.",
+        artifacts=artifacts,
+        data=report,
+    )
+
+
 def align_tone_hsv(
     case: CaseConfig,
     output_dir: Path,

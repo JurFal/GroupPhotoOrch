@@ -57,6 +57,12 @@
       "mode": "python_adapter",
       "stage": "stage3_compositing",
       "expensive": true
+    },
+    "compositing.compose_all_candidates": {
+      "description": "Run PersonInserter.compose_and_paste with ImageCompositor on every serialized stage-2 candidate.",
+      "mode": "python_adapter",
+      "stage": "stage3_compositing",
+      "expensive": true
     }
   }
 }

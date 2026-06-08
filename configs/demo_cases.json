@@ -17,6 +17,42 @@
         "insertion": 1,
         "compositing": 1
       }
+    },
+    {
+      "case_id": "g2_p2",
+      "goal": "insert_person_into_group_photo",
+      "computer_graphics_root": ".",
+      "group_id": "g2",
+      "person_id": "p2",
+      "top_k": 5,
+      "expected": {
+        "min_group_persons": 2,
+        "max_group_persons": 120,
+        "min_persons_in_individual": 1
+      },
+      "revision_limits": {
+        "vision": 1,
+        "insertion": 1,
+        "compositing": 1
+      }
+    },
+    {
+      "case_id": "g3_p3",
+      "goal": "insert_person_into_group_photo",
+      "computer_graphics_root": ".",
+      "group_id": "g3",
+      "person_id": "p3",
+      "top_k": 5,
+      "expected": {
+        "min_group_persons": 2,
+        "max_group_persons": 120,
+        "min_persons_in_individual": 1
+      },
+      "revision_limits": {
+        "vision": 1,
+        "insertion": 1,
+        "compositing": 1
+      }
     }
   ]
 }
